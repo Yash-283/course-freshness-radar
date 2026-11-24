@@ -6,26 +6,61 @@ const raw = new DatabaseSync('data/radar.db');
 
 raw.exec('PRAGMA journal_mode = WAL;');
 raw.exec(`
+  -- Course files found in SharePoint
   CREATE TABLE IF NOT EXISTS files (
     id TEXT PRIMARY KEY,
     area TEXT, course TEXT, path TEXT, name TEXT,
     cTag TEXT, size INTEGER, lastModified TEXT, indexedAt TEXT
   );
+
+  -- Text pieces of each file (slide, section, lab step)
   CREATE TABLE IF NOT EXISTS chunks (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     fileId TEXT, course TEXT, location TEXT, text TEXT
   );
   CREATE INDEX IF NOT EXISTS idx_chunks_file ON chunks(fileId);
 
-    CREATE TABLE IF NOT EXISTS changes (
-    id TEXT PRIMARY KEY,            -- fingerprint, so the same post is never saved twice
+  -- Vendor news posts (+ AI triage results)
+  CREATE TABLE IF NOT EXISTS changes (
+    id TEXT PRIMARY KEY,
     source TEXT, vendor TEXT,
     title TEXT, link TEXT, date TEXT, summary TEXT,
     firstSeen TEXT,
-    relevant INTEGER, products TEXT, changeType TEXT,   -- filled later by AI triage
+    relevant INTEGER, products TEXT, changeType TEXT,
     keywords TEXT, examCodes TEXT, triagedAt TEXT
   );
+
+  -- Every AI call and its cost (for the monthly cap)
+  CREATE TABLE IF NOT EXISTS ai_usage (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    at TEXT, model TEXT, purpose TEXT,
+    inputTokens INTEGER, outputTokens INTEGER, costUsd REAL
+  );
+
+  -- Problems found in course content
+  CREATE TABLE IF NOT EXISTS flags (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    changeId TEXT, chunkId INTEGER, course TEXT, location TEXT,
+    impact TEXT,
+    verdict TEXT, reason TEXT, currentText TEXT, suggestedText TEXT,
+    confidence REAL, checkedBy TEXT,
+    status TEXT DEFAULT 'New',
+    createdAt TEXT, updatedAt TEXT,
+    isSample INTEGER DEFAULT 0
+  );
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_flags_unique ON flags(changeId, chunkId, course);
+
+  -- TPM actions on flags (Accept / Dismiss / Fixed)
+  CREATE TABLE IF NOT EXISTS reviews (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    flagId INTEGER, action TEXT, note TEXT, at TEXT
+  );
 `);
+
+// Small upgrades to existing tables (ignored if already done)
+for (const sql of ['ALTER TABLE changes ADD COLUMN courses TEXT']) {
+  try { raw.exec(sql); } catch { /* column already exists */ }
+}
 
 // Turn values into what SQLite accepts (undefined -> null; {id: ..} -> {'@id': ..})
 function fixArgs(args) {
@@ -45,7 +80,6 @@ export const db = {
       run: (...a) => stmt.run(...fixArgs(a)),
     };
   },
-  // Run several writes as one all-or-nothing step
   transaction(fn) {
     return (...args) => {
       raw.exec('BEGIN');
