@@ -1,43 +1,55 @@
+import fs from 'node:fs';
 import { config } from './config.js';
 import { source } from './source/index.js';
-import { pickLatestVersion, oddVersionNames } from './source/versions.js';
+import { getCourses, selectContentFolders, collectFiles } from './source/courses.js';
+
+const report = [];
+const log = (line = '') => report.push(line);
+const started = Date.now();
 
 console.log(`Reading from: ${config.source.toUpperCase()}`);
+log(`Reading from: ${config.source.toUpperCase()}`);
+let totalCourses = 0;
+let totalFiles = 0;
 
 for (const area of await source.getAreas()) {
+  const areaCfg = config.areas.find((a) => a.name === area.name);
   console.log(`\n=== ${area.name} ===`);
+  log(`\n=== ${area.name} ===`);
 
   let courses;
   try {
-    courses = await source.listFolders(area.ref);
+    courses = await getCourses({ ...area, ...areaCfg });
   } catch (err) {
     console.log(`  ⚠ Cannot read ${area.name}: ${err.message}`);
     continue;
   }
 
   for (const course of courses) {
-    const versionFolders = await source.listFolders(course.ref);
-    const names = versionFolders.map((v) => v.name);
-    const latest = pickLatestVersion(names);
+    totalCourses++;
+    const label = course.category ? `${course.category} › ${course.name}` : course.name;
+    process.stdout.write(`  Scanning ${label} ... `);
 
-    console.log(`\nCourse: ${course.name}`);
-    console.log(`  Version folders: ${names.join(', ') || '(none)'}`);
+    const warnings = [];
+    const { folders, skipped } = await selectContentFolders(course, areaCfg);
+    const perFolder = await Promise.all(
+      folders.map((f) => collectFiles(f.ref, f.name, warnings))
+    );
+    const files = perFolder.flat();
+    totalFiles += files.length;
+    console.log(`${files.length} files`);
 
-    const odd = oddVersionNames(names);
-    if (odd.length) console.log(`  ⚠ Check naming: ${odd.join(', ')}`);
-
-    if (!latest) {
-      console.log('  ⚠ No V folder found - skipping');
-      continue;
-    }
-
-    console.log(`  ✅ Reading latest: ${latest.name}`);
-    const latestFolder = versionFolders.find((v) => v.name === latest.name);
-    const files = await source.listFilesRecursive(latestFolder.ref, latest.name);
-
-    for (const f of files) {
-      console.log(`     - ${f.path}  (${Math.round(f.size / 1024)} KB)`);
-    }
-    if (!files.length) console.log('     (no supported files found)');
+    log(`\nCourse: ${label}`);
+    log(`  ✅ Checking: ${folders.map((f) => f.name).join(', ') || '(nothing)'}`);
+    if (skipped.length) log(`  ⏭  Skipping: ${skipped.join(', ')}`);
+    for (const w of warnings) log(`  ⚠ ${w}`);
+    for (const f of files) log(`     - ${f.path}  (${Math.round(f.size / 1024)} KB)`);
+    log(`  → ${files.length} files`);
   }
 }
+
+const seconds = Math.round((Date.now() - started) / 1000);
+const summary = `Summary: ${totalCourses} courses, ${totalFiles} files to check (${seconds}s)`;
+log(`\n${summary}`);
+fs.writeFileSync('scan.txt', report.join('\n'), 'utf8');
+console.log(`\n${summary}\nDetails saved to scan.txt`);

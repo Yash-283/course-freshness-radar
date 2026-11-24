@@ -1,20 +1,27 @@
-// From a list of folder names, return the highest "V<number>" folder.
-// Example: ['V1','V3','V4','Archive'] -> { name: 'V4', num: 4 }
-export function pickLatestVersion(folderNames) {
-  const versions = folderNames
-    .map((name) => {
-      const match = name.trim().match(/^v(\d+)$/i); // V4, v4, V10
-      return match ? { name, num: Number(match[1]) } : null;
-    })
-    .filter(Boolean)
-    .sort((a, b) => b.num - a.num); // biggest number first
-
-  return versions[0] || null;
+// Turn a folder name into a version number, or null if it isn't a version folder.
+// Handles: V1, v2, V10, V0.1, V0.2, V.03, V2.a, V2.b
+export function parseVersion(name) {
+  const m = name.trim().match(/^v\s*(\d*)\s*(?:\.\s*(\d+))?\s*(?:[.\s_-]?\s*([a-z]))?$/i);
+  if (!m || (m[1] === '' && m[2] === undefined)) return null;
+  return {
+    name,
+    major: m[1] === '' ? 0 : Number(m[1]),        // "V.03" -> major 0
+    minor: m[2] === undefined ? 0 : Number(m[2]), // "V0.2" -> 2, "V.03" -> 3
+    letter: m[3] ? m[3].toLowerCase() : '',       // "V2.b" -> b
+  };
 }
 
-// Names that look like versions but break the rule, e.g. "V4 Final", "V5 Draft"
+const compare = (a, b) =>
+  a.major - b.major || a.minor - b.minor || a.letter.localeCompare(b.letter);
+
+// From a list of folder names, return the latest version (or null if none)
+export function pickLatestVersion(folderNames) {
+  const versions = folderNames.map(parseVersion).filter(Boolean);
+  if (!versions.length) return null;
+  return versions.sort(compare).at(-1);
+}
+
+// Names that start like a version but don't follow the pattern, e.g. "V4 Final"
 export function oddVersionNames(folderNames) {
-  return folderNames.filter(
-    (n) => /^v\d/i.test(n.trim()) && !/^v\d+$/i.test(n.trim())
-  );
+  return folderNames.filter((n) => /^v\s*\.?\d/i.test(n.trim()) && !parseVersion(n));
 }

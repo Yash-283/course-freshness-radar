@@ -102,3 +102,17 @@ export async function listFilesRecursive(ref, relPath = '') {
 export async function readFile(file) {
   return graphFetch(`/drives/${driveId}/items/${file.id}/content`, { raw: true });
 }
+// Folders and files directly inside one folder (one Graph call)
+export async function listContents(ref) {
+  const items = await listChildren(ref);
+  return {
+    folders: items.filter((i) => i.folder).map((i) => ({ name: i.name, ref: i.id })),
+    files: items.filter((i) => i.file).map((i) => ({
+      id: i.id,
+      name: i.name,
+      size: i.size,
+      lastModified: i.lastModifiedDateTime,
+      cTag: i.cTag,
+    })),
+  };
+}

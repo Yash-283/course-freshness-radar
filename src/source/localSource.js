@@ -48,3 +48,25 @@ export async function listFilesRecursive(ref, relPath = '') {
 export async function readFile(file) {
   return fs.readFile(file.id);
 }
+// Folders and files directly inside one folder
+export async function listContents(ref) {
+  const entries = await fs.readdir(ref, { withFileTypes: true });
+  const folders = [];
+  const files = [];
+  for (const e of entries) {
+    const full = path.join(ref, e.name);
+    if (e.isDirectory()) {
+      folders.push({ name: e.name, ref: full });
+    } else {
+      const s = await fs.stat(full);
+      files.push({
+        id: full,
+        name: e.name,
+        size: s.size,
+        lastModified: s.mtime.toISOString(),
+        cTag: `${s.size}-${Math.round(s.mtimeMs)}`,
+      });
+    }
+  }
+  return { folders, files };
+}
