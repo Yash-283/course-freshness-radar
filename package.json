@@ -11,7 +11,10 @@
     "show-news": "node --experimental-sqlite src/news/show-news.js",
     "dashboard": "node --experimental-sqlite src/server.js",
     "sample-flags": "node --experimental-sqlite src/seed-sample.js",
-    "remove-samples": "node --experimental-sqlite src/seed-sample.js --remove"
+    "remove-samples": "node --experimental-sqlite src/seed-sample.js --remove",
+    "ai-test": "node --experimental-sqlite src/ai/test.js",
+    "triage": "node --experimental-sqlite src/ai/triage.js",
+    "triage-all": "node --experimental-sqlite src/ai/triage.js --all"
   },
   "keywords": [],
   "author": "",
