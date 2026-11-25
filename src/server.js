@@ -50,10 +50,13 @@ app.get('/api/flags', (req, res) => {
 
 // ---- One flag in full ----
 app.get('/api/flags/:id', (req, res) => {
-  const flag = db.prepare(`
+   const flag = db.prepare(`
     SELECT f.*, c.title, c.vendor, c.link, c.summary, c.changeType,
-           COALESCE(c.date, c.firstSeen) AS changeDate
-    FROM flags f LEFT JOIN changes c ON c.id = f.changeId
+           COALESCE(c.date, c.firstSeen) AS changeDate,
+           fi.webUrl AS fileUrl, fi.name AS fileName
+    FROM flags f
+    LEFT JOIN changes c ON c.id = f.changeId
+    LEFT JOIN files fi ON fi.id = f.fileId
     WHERE f.id = ?`).get(Number(req.params.id));
   if (!flag) return res.status(404).json({ error: 'Flag not found' });
   flag.history = db.prepare('SELECT action, note, at FROM reviews WHERE flagId = ? ORDER BY at DESC').all(flag.id);

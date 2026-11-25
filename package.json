@@ -14,7 +14,10 @@
     "remove-samples": "node --experimental-sqlite src/seed-sample.js --remove",
     "ai-test": "node --experimental-sqlite src/ai/test.js",
     "triage": "node --experimental-sqlite src/ai/triage.js",
-    "triage-all": "node --experimental-sqlite src/ai/triage.js --all"
+    "triage-all": "node --experimental-sqlite src/ai/triage.js --all",
+    "judge": "node --experimental-sqlite src/ai/judge.js",
+    "judge-all": "node --experimental-sqlite src/ai/judge.js --all",
+    "match-debug": "node --experimental-sqlite src/match/debug.js"
   },
   "keywords": [],
   "author": "",

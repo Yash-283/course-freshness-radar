@@ -1,16 +1,23 @@
+
 import { ConfidentialClientApplication } from '@azure/msal-node';
+
 import { config } from '../config.js';
+
 import { isArchive, keepFile } from './filters.js';
+
 
 const GRAPH = 'https://graph.microsoft.com/v1.0';
 const env = process.env;
 
+
 // Stop early with a clear message if a setting is missing
 for (const key of ['GRAPH_TENANT_ID', 'GRAPH_CLIENT_ID', 'GRAPH_CLIENT_SECRET',
-                   'GRAPH_DRIVE_ID', 'AI_COURSES_FOLDER_ID', 'AWS_COURSES_FOLDER_ID']) {
+                   'GRAPH_DRIVE_ID', 'AI_COURSES_FOLDER_ID',
+                   'AWS_COURSES_FOLDER_ID']) {
   if (!env[key]) throw new Error(`Missing ${key} in .env`);
 }
 const driveId = env.GRAPH_DRIVE_ID;
+
 
 // 1) The tool's identity (Entra ID app) - gets access tokens
 const msal = new ConfidentialClientApplication({
@@ -21,6 +28,7 @@ const msal = new ConfidentialClientApplication({
   },
 });
 
+
 async function getToken() {
   // msal reuses the token until it expires (~1 hour)
   const result = await msal.acquireTokenByClientCredential({
@@ -28,6 +36,7 @@ async function getToken() {
   });
   return result.accessToken;
 }
+
 
 // 2) One helper for every Graph call: adds the token, waits if throttled
 async function graphFetch(url, { raw = false } = {}, attempt = 1) {
@@ -43,31 +52,39 @@ async function graphFetch(url, { raw = false } = {}, attempt = 1) {
     await new Promise((r) => setTimeout(r, wait * 1000));
     return graphFetch(url, { raw }, attempt + 1);
   }
+
   if (!res.ok) {
     const body = await res.text();
     throw new Error(`Graph ${res.status} on ${url}: ${body.slice(0, 300)}`);
   }
+
   return raw ? Buffer.from(await res.arrayBuffer()) : res.json();
 }
+
 
 // 3) List everything inside a folder (handles multiple pages)
 async function listChildren(itemId) {
   const items = [];
   let url = `/drives/${driveId}/items/${itemId}/children` +
-            `?$select=id,name,size,folder,file,cTag,lastModifiedDateTime&$top=200`;
+            `?$select=id,name,size,folder,file,cTag,lastModifiedDateTime,webUrl&$top=200`;
+
   while (url) {
     const page = await graphFetch(url);
     items.push(...page.value);
     url = page['@odata.nextLink']; // next page, if any
   }
+
   return items;
 }
 
+
 // ---- The same 4 functions as localSource.js ----
+
 
 export async function getAreas() {
   return config.areas.map((a) => ({ name: a.name, ref: env[a.idEnv] }));
 }
+
 
 export async function listFolders(ref) {
   const children = await listChildren(ref);
@@ -75,6 +92,7 @@ export async function listFolders(ref) {
     .filter((i) => i.folder && !isArchive(i.name))
     .map((i) => ({ name: i.name, ref: i.id }));
 }
+
 
 export async function listFilesRecursive(ref, relPath = '') {
   const out = [];
@@ -96,12 +114,16 @@ export async function listFilesRecursive(ref, relPath = '') {
       cTag: item.cTag, // real content tag from SharePoint
     });
   }
+
   return out;
 }
+
 
 export async function readFile(file) {
   return graphFetch(`/drives/${driveId}/items/${file.id}/content`, { raw: true });
 }
+
+
 // Folders and files directly inside one folder (one Graph call)
 export async function listContents(ref) {
   const items = await listChildren(ref);
@@ -113,6 +135,7 @@ export async function listContents(ref) {
       size: i.size,
       lastModified: i.lastModifiedDateTime,
       cTag: i.cTag,
+      webUrl: i.webUrl,   // link that opens the file in SharePoint
     })),
   };
 }

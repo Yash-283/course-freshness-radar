@@ -58,10 +58,18 @@ raw.exec(`
 `);
 
 // Small upgrades to existing tables (ignored if already done)
-for (const sql of ['ALTER TABLE changes ADD COLUMN courses TEXT']) {
+// Small upgrades to existing tables (ignored if already done)
+for (const sql of [
+  'ALTER TABLE changes ADD COLUMN courses TEXT',
+  'ALTER TABLE changes ADD COLUMN judgedAt TEXT',
+  'ALTER TABLE files ADD COLUMN webUrl TEXT',    // SharePoint link of each file
+  'ALTER TABLE flags ADD COLUMN fileId TEXT',    // which file a flag belongs to
+]) {
   try { raw.exec(sql); } catch { /* column already exists */ }
 }
-
+// Fill in fileId for flags created before this column existed
+raw.exec(`UPDATE flags SET fileId = (SELECT fileId FROM chunks WHERE chunks.id = flags.chunkId)
+          WHERE fileId IS NULL`);
 // Turn values into what SQLite accepts (undefined -> null; {id: ..} -> {'@id': ..})
 function fixArgs(args) {
   if (args.length === 1 && args[0] && typeof args[0] === 'object' && !Buffer.isBuffer(args[0])) {

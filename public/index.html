@@ -182,6 +182,7 @@ async function viewFlag(id) {
       </div>
       <div class="box">
         <div class="lbl">What our course says now</div>
+                ${f.fileUrl ? `<p><a href="${esc(f.fileUrl)}" target="_blank" rel="noopener">📄 Open ${esc(f.fileName || 'file')} in SharePoint ↗</a></p>` : ''}
         <div class="quote">${esc(f.currentText || '')}</div>
       </div>
     </div>
