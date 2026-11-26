@@ -234,7 +234,10 @@ textarea { width: 100%; resize: vertical; }
 .place:last-child { border-bottom: 0; }
 .place-row { display: flex; align-items: center; gap: 10px; padding: 9px 2px; }
 .place-row input[type=checkbox] { width: 17px; height: 17px; accent-color: var(--low); cursor: pointer; flex: none; }
-.place-loc { flex: 1; display: flex; align-items: center; gap: 6px; border: 0; background: none; text-align: left; font: inherit; font-size: 13.5px; color: var(--ink); cursor: pointer; padding: 0; flex-wrap: wrap; }
+.place-loc { flex: 1; min-width: 0; display: flex; align-items: flex-start; gap: 6px; border: 0; background: none; text-align: left; font: inherit; font-size: 13.5px; color: var(--ink); cursor: pointer; padding: 0; }
+.place-loc > svg { flex: none; margin-top: 2px; }
+.place-loc > span:first-of-type { min-width: 0; overflow-wrap: anywhere; }
+.place-loc .tag-new, .place-loc .badge { flex: none; margin-left: 4px; }
 .place.done .place-loc span { text-decoration: line-through; color: var(--muted); }
 .place-detail { padding: 4px 0 14px 27px; }
 .place-detail .compare { margin-bottom: 8px; }
