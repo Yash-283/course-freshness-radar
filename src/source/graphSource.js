@@ -1,4 +1,3 @@
-
 import { ConfidentialClientApplication } from '@azure/msal-node';
 
 import { config } from '../config.js';
@@ -66,7 +65,7 @@ async function graphFetch(url, { raw = false } = {}, attempt = 1) {
 async function listChildren(itemId) {
   const items = [];
   let url = `/drives/${driveId}/items/${itemId}/children` +
-            `?$select=id,name,size,folder,file,cTag,lastModifiedDateTime,webUrl&$top=200`;
+            `?$select=id,name,size,folder,file,cTag,createdDateTime,lastModifiedDateTime,webUrl&$top=200`;
 
   while (url) {
     const page = await graphFetch(url);
@@ -128,7 +127,12 @@ export async function readFile(file) {
 export async function listContents(ref) {
   const items = await listChildren(ref);
   return {
-    folders: items.filter((i) => i.folder).map((i) => ({ name: i.name, ref: i.id })),
+    folders: items.filter((i) => i.folder).map((i) => ({
+      name: i.name,
+      ref: i.id,
+      created: i.createdDateTime,          // when the folder was created in SharePoint
+      childCount: i.folder?.childCount ?? null, // 0 = empty folder
+    })),
     files: items.filter((i) => i.file).map((i) => ({
       id: i.id,
       name: i.name,

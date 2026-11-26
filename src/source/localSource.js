@@ -56,7 +56,10 @@ export async function listContents(ref) {
   for (const e of entries) {
     const full = path.join(ref, e.name);
     if (e.isDirectory()) {
-      folders.push({ name: e.name, ref: full });
+      const s = await fs.stat(full);
+      const born = s.birthtimeMs > 0 ? s.birthtime : s.ctime; // some systems have no birth time
+      const childCount = (await fs.readdir(full)).length;
+      folders.push({ name: e.name, ref: full, created: born.toISOString(), childCount });
     } else {
       const s = await fs.stat(full);
       files.push({

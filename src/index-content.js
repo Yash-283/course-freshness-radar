@@ -1,9 +1,9 @@
-
 import fs from "node:fs";
 import { source } from "./source/index.js";
 import { discoverCourses } from "./discover.js";
 import { extractChunks } from "./extract/index.js";
 import { db } from "./db/db.js";
+import { notifyAdmin } from "./notify/notify.js";
 
 
 const getFile = db.prepare("SELECT cTag FROM files WHERE id = ?");
@@ -98,10 +98,34 @@ const stale = db
   .prepare("SELECT id FROM files")
   .all()
   .filter((r) => !currentIds.has(r.id));
+// Their open flags are closed: the file is no longer part of the latest course material
+const closeFileFlags = db.prepare(`
+  UPDATE flags SET status = 'Dismissed', updatedAt = ? WHERE fileId = ? AND status IN ('New', 'Accepted')
+  RETURNING id`);
+const addReview = db.prepare('INSERT INTO reviews (flagId, action, note, at) VALUES (?, ?, ?, ?)');
+let autoClosed = 0;
 for (const r of stale) {
+  const now = new Date().toISOString();
+  for (const { id } of closeFileFlags.all(now, r.id)) {
+    addReview.run(id, 'Dismissed', 'Closed automatically: file is no longer in the latest version (or was removed from SharePoint)', now);
+    autoClosed++;
+  }
   deleteChunks.run(r.id);
   deleteFile.run(r.id);
 }
+if (autoClosed) console.log(`\n${autoClosed} open flag(s) closed because their file is no longer in the latest version`);
+
+// New or changed course content must also be checked against news we already judged.
+// Mark those relevant posts as "not judged" so the Judge step re-checks them (cheap: Haiku only).
+const touched = [...new Set(changed.map((f) => f.course))];
+const rejudge = db.prepare(`
+  UPDATE changes SET judgedAt = NULL
+  WHERE relevant = 1 AND judgedAt IS NOT NULL AND courses LIKE ?`);
+let rejudged = 0;
+for (const course of touched) {
+  rejudged += rejudge.run(`%${course.split(' › ').pop()}%`).changes;
+}
+if (rejudged) console.log(`${rejudged} relevant post(s) will be re-checked against the new or changed content`);
 
 
 const totals = db.prepare("SELECT COUNT(*) AS n FROM chunks").get().n;
@@ -109,6 +133,26 @@ const seconds = Math.round((Date.now() - started) / 1000);
 console.log(
   `\n\nDone in ${seconds}s: ${chunkCount} chunks added this run, ${stale.length} old files removed, ${totals} chunks in total`,
 );
+
+
+// Version-folder warnings: show them, and email the admin only about NEW ones (once)
+const versionWarnings = courses.flatMap((c) => (c.warnings || []).map((w) => `${c.course}: ${w}`));
+if (versionWarnings.length) {
+  console.log(`\n⚠ ${versionWarnings.length} version-folder warning(s):`);
+  for (const w of versionWarnings) console.log(`  - ${w}`);
+}
+const SENT_FILE = "data/version-warnings-sent.json";
+let alreadySent = [];
+try { alreadySent = JSON.parse(fs.readFileSync(SENT_FILE, "utf8")); } catch { /* first run */ }
+const fresh = versionWarnings.filter((w) => !alreadySent.includes(w));
+if (fresh.length) {
+  try {
+    await notifyAdmin(`Check version folders: ${fresh.length} new warning(s)`, fresh);
+  } catch (err) {
+    console.log(`  (could not email the admin: ${err.message})`);
+  }
+}
+fs.writeFileSync(SENT_FILE, JSON.stringify(versionWarnings, null, 2), "utf8");
 
 
 if (failed.length) {

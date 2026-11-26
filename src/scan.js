@@ -30,8 +30,7 @@ for (const area of await source.getAreas()) {
     const label = course.category ? `${course.category} › ${course.name}` : course.name;
     process.stdout.write(`  Scanning ${label} ... `);
 
-    const warnings = [];
-    const { folders, skipped } = await selectContentFolders(course, areaCfg);
+    const { folders, skipped, warnings, latest, latestCreated } = await selectContentFolders(course, areaCfg);
     const perFolder = await Promise.all(
       folders.map((f) => collectFiles(f.ref, f.name, warnings))
     );
@@ -40,6 +39,7 @@ for (const area of await source.getAreas()) {
     console.log(`${files.length} files`);
 
     log(`\nCourse: ${label}`);
+    log(`  📌 Latest version folder: ${latest ? `${latest} (created ${String(latestCreated || '?').slice(0, 10)})` : '(none – no version folders, reading all folders)'}`);
     log(`  ✅ Checking: ${folders.map((f) => f.name).join(', ') || '(nothing)'}`);
     if (skipped.length) log(`  ⏭  Skipping: ${skipped.join(', ')}`);
     for (const w of warnings) log(`  ⚠ ${w}`);

@@ -11,14 +11,13 @@ export async function discoverCourses(onProgress = () => {}) {
 
     for (const course of courses) {
       const label = course.category ? `${course.category} › ${course.name}` : course.name;
-      const warnings = [];
-      const { folders } = await selectContentFolders(course, areaCfg);
+      const { folders, warnings } = await selectContentFolders(course, areaCfg);
       const files = (await Promise.all(
         folders.map((f) => collectFiles(f.ref, f.name, warnings))
       )).flat();
 
       onProgress(label, files.length);
-      result.push({ area: area.name, course: label, files });
+      result.push({ area: area.name, course: label, files, warnings });
     }
   }
   return result;
