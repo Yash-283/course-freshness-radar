@@ -1,3 +1,5 @@
+import fs from 'node:fs';
+import path from 'node:path';
 import 'dotenv/config';
 import express from 'express';
 import { db } from './db/db.js';
@@ -24,7 +26,8 @@ app.get('/api/overview', (req, res) => {
            (SELECT COUNT(*) FROM changes WHERE relevant = 1) AS relevantNews,
            (SELECT MAX(indexedAt) FROM files) AS lastIndexed`).get();
   const spent = db.prepare('SELECT COALESCE(SUM(costUsd), 0) AS s FROM ai_usage WHERE at >= ?').get(monthStart()).s;
-  res.json({ courses: courseScores(), totals, ai: { spent, cap: CAP } });
+    const lastRun = db.prepare('SELECT startedAt, status, newFlags, aiCost FROM runs ORDER BY id DESC LIMIT 1').get() || null;
+  res.json({ courses: courseScores(), totals, ai: { spent, cap: CAP }, lastRun });
 });
 
 // ---- Flags list with filters ----
@@ -91,5 +94,20 @@ app.get('/api/news', (req, res) => {
 // Only reachable from this laptop until proper login is added on AWS
 const PORT = Number(process.env.PORT || 3000);
 app.listen(PORT, '127.0.0.1', () => {
+  // ---- Emails (sent or previewed) ----
+app.get('/api/notifications', (req, res) => {
+  res.json(db.prepare(`
+    SELECT id, at, type, recipients, subject, flagIds, mode FROM notifications
+    ORDER BY at DESC LIMIT 100`).all());
+});
+
+// Show a preview email (only files inside data/outbox)
+app.get('/api/notifications/:id/html', (req, res) => {
+  const row = db.prepare('SELECT file FROM notifications WHERE id = ?').get(Number(req.params.id));
+  const outbox = path.resolve('data/outbox');
+  const file = row?.file ? path.resolve(row.file) : null;
+  if (!file || !file.startsWith(outbox) || !fs.existsSync(file)) return res.status(404).send('Preview not found');
+  res.type('html').send(fs.readFileSync(file, 'utf8'));
+});
   console.log(`Dashboard running at http://localhost:${PORT}`);
 });

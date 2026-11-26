@@ -100,6 +100,7 @@ async function fromVersionedMd(src) {
 const insert = db.prepare(`
   INSERT OR IGNORE INTO changes (id, source, vendor, title, link, date, summary, firstSeen)
   VALUES (?, ?, ?, ?, ?, ?, ?, ?)`);
+  const linkExists = db.prepare('SELECT 1 FROM changes WHERE link = ? LIMIT 1');
 const now = new Date().toISOString();
 let totalNew = 0;
 
@@ -113,7 +114,9 @@ for (const src of NEWS_SOURCES) {
 
     const items = raw.filter((i) => i.title && (!i.date || Date.parse(i.date) >= since));
     let added = 0;
-    for (const i of items) {
+        for (const i of items) {
+      // Same announcement published in two feeds (e.g. GitHub changelog + Copilot feed) → keep one
+      if (i.link && src.type === 'rss' && linkExists.get(i.link)) continue;
       added += insert.run(fingerprint(src.id, i.title, i.date || ''), src.id, src.vendor,
                           i.title, i.link, i.date, i.summary, now).changes;
     }

@@ -68,6 +68,7 @@
   <a href="#/" data-r="overview">Overview</a>
   <a href="#/flags" data-r="flags">Flags</a>
   <a href="#/news" data-r="news">Vendor news</a>
+    <a href="#/emails" data-r="emails">Emails</a>
 </nav>
 <main id="app">Loading…</main>
 
@@ -104,7 +105,9 @@ async function viewOverview() {
       ${kpi(high, 'High / certification', high ? 'red' : '')}
       ${kpi(`${d.totals.relevantNews} / ${d.totals.news}`, 'Relevant vendor posts')}
       ${kpi(`${d.totals.files} / ${d.totals.chunks.toLocaleString()}`, 'Files / chunks indexed')}
-      ${kpi(fmtDate(d.totals.lastIndexed), 'Last content sync')}
+            ${kpi(d.lastRun ? fmtDate(d.lastRun.startedAt) : 'Not yet',
+            d.lastRun ? `Last daily run · ${d.lastRun.status === 'ok' ? '✅ OK' : '❌ failed'}` : 'Last daily run',
+            d.lastRun?.status === 'failed' ? 'red' : '')}
     </div>
     ${areas.map((area) => `
       <h2>${esc(area)}</h2>
@@ -234,17 +237,43 @@ async function viewNews() {
     </table>`;
 }
 
+// ---------------- Emails ----------------
+async function viewEmails() {
+  const rows = await api('/notifications');
+  app.innerHTML = `
+    <h2>Emails sent by the tool ${rows[0]?.mode === 'preview' ? '<span class="badge Medium">Preview mode – not actually sent</span>' : ''}</h2>
+    ${rows.length ? `<table>
+      <tr><th>When</th><th>Type</th><th>To</th><th>Subject</th><th>Flags</th></tr>
+      ${rows.map((r) => `
+        <tr class="email-row" data-id="${r.id}" style="cursor:pointer">
+          <td>${fmtDate(r.at)}</td><td>${esc(r.type)}</td><td>${esc(r.recipients)}</td>
+          <td>${esc(r.subject)}</td><td>${JSON.parse(r.flagIds || '[]').length}</td>
+        </tr>`).join('')}
+    </table>
+    <h2>Preview</h2>
+    <iframe id="emailPreview" title="Email preview" sandbox="allow-popups allow-popups-to-escape-sandbox"
+            style="width:100%;height:640px;border:1px solid var(--line);border-radius:10px;background:#fff"></iframe>`
+    : '<div class="empty">No emails yet. Run "npm run notify".</div>'}`;
+
+  const frame = document.getElementById('emailPreview');
+  const show = (id) => { if (frame) frame.src = `/api/notifications/${id}/html`; };
+  app.querySelectorAll('.email-row').forEach((tr) => (tr.onclick = () => show(tr.dataset.id)));
+  if (rows[0]) show(rows[0].id);
+}
+
 // ---------------- Simple router ----------------
 function route() {
   const [path, query] = (location.hash || '#/').slice(1).split('?');
   document.querySelectorAll('nav a').forEach((a) => {
     const r = a.dataset.r;
     a.classList.toggle('active',
-      (r === 'overview' && path === '/') || (r === 'flags' && path.startsWith('/flag')) || (r === 'news' && path === '/news'));
+      (r === 'overview' && path === '/') || (r === 'flags' && path.startsWith('/flag')) ||
+      (r === 'news' && path === '/news') || (r === 'emails' && path === '/emails'));
   });
   const view = path.startsWith('/flag/') ? viewFlag(path.split('/')[2])
              : path.startsWith('/flags') ? viewFlags(query || '')
              : path === '/news' ? viewNews()
+             : path === '/emails' ? viewEmails()
              : viewOverview();
   view.catch((e) => (app.innerHTML = `<div class="error">Could not load: ${esc(e.message)}</div>`));
 }

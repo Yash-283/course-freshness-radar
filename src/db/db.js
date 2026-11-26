@@ -2,9 +2,11 @@ import fs from 'node:fs';
 import { DatabaseSync } from 'node:sqlite'; // SQLite built into Node.js - nothing to install
 
 fs.mkdirSync('data', { recursive: true });
+
 const raw = new DatabaseSync('data/radar.db');
 
 raw.exec('PRAGMA journal_mode = WAL;');
+
 raw.exec(`
   -- Course files found in SharePoint
   CREATE TABLE IF NOT EXISTS files (
@@ -55,6 +57,21 @@ raw.exec(`
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     flagId INTEGER, action TEXT, note TEXT, at TEXT
   );
+
+  -- Every email sent (or previewed)
+  CREATE TABLE IF NOT EXISTS notifications (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    at TEXT, type TEXT, recipients TEXT, subject TEXT,
+    flagIds TEXT, mode TEXT, file TEXT
+  );
+
+  -- One row per daily run
+  CREATE TABLE IF NOT EXISTS runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    startedAt TEXT, finishedAt TEXT, status TEXT,
+    steps TEXT, newFlags INTEGER, openFlags INTEGER, aiCost REAL
+  );
+
 `);
 
 // Small upgrades to existing tables (ignored if already done)
@@ -64,12 +81,15 @@ for (const sql of [
   'ALTER TABLE changes ADD COLUMN judgedAt TEXT',
   'ALTER TABLE files ADD COLUMN webUrl TEXT',    // SharePoint link of each file
   'ALTER TABLE flags ADD COLUMN fileId TEXT',    // which file a flag belongs to
+  'ALTER TABLE flags ADD COLUMN notifiedAt TEXT',   // when a flag was emailed
 ]) {
   try { raw.exec(sql); } catch { /* column already exists */ }
 }
+
 // Fill in fileId for flags created before this column existed
 raw.exec(`UPDATE flags SET fileId = (SELECT fileId FROM chunks WHERE chunks.id = flags.chunkId)
           WHERE fileId IS NULL`);
+
 // Turn values into what SQLite accepts (undefined -> null; {id: ..} -> {'@id': ..})
 function fixArgs(args) {
   if (args.length === 1 && args[0] && typeof args[0] === 'object' && !Buffer.isBuffer(args[0])) {

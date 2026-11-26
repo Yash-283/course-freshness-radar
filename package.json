@@ -17,7 +17,10 @@
     "triage-all": "node --experimental-sqlite src/ai/triage.js --all",
     "judge": "node --experimental-sqlite src/ai/judge.js",
     "judge-all": "node --experimental-sqlite src/ai/judge.js --all",
-    "match-debug": "node --experimental-sqlite src/match/debug.js"
+    "match-debug": "node --experimental-sqlite src/match/debug.js",
+    "notify": "node --experimental-sqlite src/notify/notify.js",
+    "digest": "node --experimental-sqlite src/notify/notify.js --digest",
+        "daily": "node --experimental-sqlite --no-warnings src/run.js"
   },
   "keywords": [],
   "author": "",
