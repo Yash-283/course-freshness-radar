@@ -90,6 +90,114 @@ app.post('/api/flags/:id/action', (req, res) => {
   res.json({ ok: true });
 });
 
+// ---- Course flags: ONE flag per course, every affected place listed inside ----
+// (each row in the flags table is one "place" = one slide / section / lab step)
+const RANK = { Certification: 0, High: 1, Medium: 2, Low: 3 };
+const higher = (a, b) => ((RANK[a] ?? 9) <= (RANK[b] ?? 9) ? a : b);
+const lastRunStart = () => db.prepare('SELECT startedAt FROM runs ORDER BY id DESC LIMIT 1').get()?.startedAt || '';
+
+// List: one row per course that has open places
+app.get('/api/course-flags', (req, res) => {
+  const rows = db.prepare(`
+    SELECT f.id, f.course, f.impact, f.status, f.changeId, f.createdAt, f.isSample, c.title, c.vendor
+    FROM flags f LEFT JOIN changes c ON c.id = f.changeId
+    WHERE f.status IN ('New', 'Accepted')`).all();
+  const since = lastRunStart();
+  const scores = new Map(courseScores().map((c) => [c.course, c]));
+  const map = new Map();
+
+  for (const r of rows) {
+    if (!map.has(r.course)) {
+      map.set(r.course, { course: r.course, impact: r.impact, places: 0, newPlaces: 0, accepted: 0, isSample: 0, latest: '', changes: new Map() });
+    }
+    const g = map.get(r.course);
+    g.places++;
+    if (since && r.createdAt >= since) g.newPlaces++;
+    if (r.status === 'Accepted') g.accepted++;
+    if (r.isSample) g.isSample = 1;
+    if (r.createdAt > g.latest) g.latest = r.createdAt;
+    g.impact = higher(r.impact, g.impact);
+    const ch = g.changes.get(r.changeId) || { title: r.title, vendor: r.vendor, impact: r.impact, places: 0 };
+    ch.impact = higher(r.impact, ch.impact);
+    ch.places++;
+    g.changes.set(r.changeId, ch);
+  }
+
+  let list = [...map.values()].map((g) => ({
+    ...g,
+    changes: [...g.changes.values()].sort((a, b) => RANK[a.impact] - RANK[b.impact]),
+    score: scores.get(g.course)?.score ?? 100,
+    scoreStatus: scores.get(g.course)?.status ?? 'Fresh',
+    area: scores.get(g.course)?.area ?? '',
+  }));
+  if (req.query.new === '1') list = list.filter((g) => g.newPlaces > 0);
+  list.sort((a, b) => RANK[a.impact] - RANK[b.impact] || b.places - a.places);
+  res.json({ lastRunStart: since, courses: list });
+});
+
+// One course flag in full: changes, each with its places
+app.get('/api/course-flag', (req, res) => {
+  const course = String(req.query.course || '');
+  const showAll = req.query.status === 'all';
+  const rows = db.prepare(`
+    SELECT f.*, c.title, c.vendor, c.link, c.summary, c.changeType,
+           COALESCE(c.date, c.firstSeen) AS changeDate,
+           fi.webUrl AS fileUrl, fi.name AS fileName
+    FROM flags f
+    LEFT JOIN changes c ON c.id = f.changeId
+    LEFT JOIN files fi ON fi.id = f.fileId
+    WHERE f.course = ? ${showAll ? '' : "AND f.status IN ('New', 'Accepted')"}
+    ORDER BY f.location`).all(course);
+
+  const score = courseScores().find((c) => c.course === course);
+  if (!score && !rows.length) return res.status(404).json({ error: 'Course not found' });
+
+  const changes = new Map();
+  for (const r of rows) {
+    if (!changes.has(r.changeId)) {
+      changes.set(r.changeId, {
+        changeId: r.changeId, title: r.title, vendor: r.vendor, link: r.link, summary: r.summary,
+        changeType: r.changeType, changeDate: r.changeDate, impact: r.impact, places: [],
+      });
+    }
+    const ch = changes.get(r.changeId);
+    ch.impact = higher(r.impact, ch.impact);
+    ch.places.push({
+      id: r.id, location: r.location, impact: r.impact, status: r.status, confidence: r.confidence,
+      currentText: r.currentText, suggestedText: r.suggestedText, reason: r.reason,
+      fileUrl: r.fileUrl, fileName: r.fileName, createdAt: r.createdAt, isSample: r.isSample,
+    });
+  }
+
+  res.json({
+    course,
+    area: score?.area ?? '',
+    score: score?.score ?? 100,
+    scoreStatus: score?.status ?? 'Fresh',
+    lastRunStart: lastRunStart(),
+    changes: [...changes.values()].sort((a, b) => RANK[a.impact] - RANK[b.impact]),
+  });
+});
+
+// Act on many places at once: all open places of a course (or just the given ids)
+app.post('/api/course-flag/action', (req, res) => {
+  const { course = '', action, note = '', ids } = req.body || {};
+  if (!ACTIONS.includes(action)) return res.status(400).json({ error: 'Unknown action' });
+
+  const targets = Array.isArray(ids) && ids.length
+    ? ids.map(Number)
+    : db.prepare("SELECT id FROM flags WHERE course = ? AND status IN ('New', 'Accepted')").all(String(course)).map((r) => r.id);
+  if (!targets.length) return res.json({ ok: true, updated: 0 });
+
+  const now = new Date().toISOString();
+  const upd = db.prepare('UPDATE flags SET status = ?, updatedAt = ? WHERE id = ?');
+  const rev = db.prepare('INSERT INTO reviews (flagId, action, note, at) VALUES (?, ?, ?, ?)');
+  for (const id of targets) {
+    if (upd.run(action, now, id).changes) rev.run(id, action, String(note).slice(0, 500), now);
+  }
+  res.json({ ok: true, updated: targets.length });
+});
+
 // ---- Vendor news ----
 app.get('/api/news', (req, res) => {
   const onlyRelevant = req.query.relevant === '1';
@@ -133,10 +241,7 @@ app.get('/api/run/status', (req, res) => {
   res.json({ ...runState, lastRun });
 });
 
-// Only reachable from this laptop until proper login is added on AWS
-const PORT = Number(process.env.PORT || 3000);
-app.listen(PORT, '127.0.0.1', () => {
-  // ---- Emails (sent or previewed) ----
+// ---- Emails (sent or previewed) ----
 app.get('/api/notifications', (req, res) => {
   res.json(db.prepare(`
     SELECT id, at, type, recipients, subject, flagIds, mode FROM notifications
@@ -151,5 +256,9 @@ app.get('/api/notifications/:id/html', (req, res) => {
   if (!file || !file.startsWith(outbox) || !fs.existsSync(file)) return res.status(404).send('Preview not found');
   res.type('html').send(fs.readFileSync(file, 'utf8'));
 });
+
+// Only reachable from this laptop until proper login is added on AWS
+const PORT = Number(process.env.PORT || 3000);
+app.listen(PORT, '127.0.0.1', () => {
   console.log(`Dashboard running at http://localhost:${PORT}`);
 });
