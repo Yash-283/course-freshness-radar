@@ -4,3 +4,5 @@ data/
 *.db
 sample-sharepoint/
 owners.json
+scan.txt
+tree.txt
