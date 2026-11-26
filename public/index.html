@@ -55,6 +55,16 @@
   .empty, .error { background:#fff; border:1px dashed var(--line); border-radius:10px; padding:24px; color:var(--muted); text-align:center; }
   .error { color:var(--high); }
   @media (max-width:760px) { .cols { grid-template-columns:1fr; } main { padding:16px; } }
+
+  .run-btn { background:#fff; color:var(--brand); font-weight:700; border-radius:8px; padding:8px 14px; }
+  .run-btn:disabled { opacity:.6; cursor:wait; }
+  .run-panel { position:fixed; right:20px; bottom:20px; width:min(620px, 92vw); background:#1E1A2E; color:#E8E4F5;
+               border-radius:12px; box-shadow:0 8px 30px rgba(0,0,0,.3); z-index:20; }
+  .run-panel.hidden { display:none; }
+  .run-head { display:flex; align-items:center; gap:10px; padding:10px 14px; border-bottom:1px solid #3A3450; }
+  .run-head .grow { flex:1; }
+  .run-head button { background:transparent; color:#E8E4F5; padding:4px 8px; }
+  #runLog { margin:0; padding:12px 14px; max-height:340px; overflow:auto; font:12.5px Consolas, monospace; white-space:pre-wrap; }
 </style>
 </head>
 <body>
@@ -62,6 +72,7 @@
   <h1>Course Freshness Radar</h1>
   <span class="tag">Vanguard training material</span>
   <span class="spacer"></span>
+  <button class="run-btn" id="runBtn">▶ Run now</button>
   <span class="tag" id="aiSpend">AI spend: –</span>
 </header>
 <nav>
@@ -71,6 +82,14 @@
     <a href="#/emails" data-r="emails">Emails</a>
 </nav>
 <main id="app">Loading…</main>
+
+<div class="run-panel hidden" id="runPanel">
+  <div class="run-head">
+    <b>Daily run</b><span class="grow" id="runStatus"></span>
+    <button id="runClose" title="Hide">✕</button>
+  </div>
+  <pre id="runLog"></pre>
+</div>
 
 <script>
 const app = document.getElementById('app');
@@ -91,6 +110,7 @@ async function api(path, options) {
 async function viewOverview() {
   const d = await api('/overview');
   state.courses = d.courses;
+  state.lastRun = d.lastRun;
   document.getElementById('aiSpend').textContent = `AI spend this month: $${d.ai.spent.toFixed(2)} / $${d.ai.cap.toFixed(2)}`;
 
   const open = d.courses.reduce((s, c) => s + c.open, 0);
@@ -133,13 +153,21 @@ async function viewOverview() {
 
 // ---------------- Flags list ----------------
 async function viewFlags(query) {
-  if (!state.courses) state.courses = (await api('/overview')).courses;
+    if (!state.courses || !('lastRun' in state)) {
+    const ov = await api('/overview');
+    state.courses = ov.courses;
+    state.lastRun = ov.lastRun;
+  }
   const q = new URLSearchParams(query);
   const course = q.get('course') || '', impact = q.get('impact') || '', status = q.get('status') || 'open';
-  const rows = await api('/flags?' + new URLSearchParams({ course, impact, status }));
+  const onlyNew = q.get('new') === '1';
+  const rows = await api('/flags?' + new URLSearchParams({ course, impact, status, ...(onlyNew ? { new: '1' } : {}) }));
+  const lastRunStart = state.lastRun?.startedAt || '';
+  const isNew = (f) => lastRunStart && f.createdAt >= lastRunStart;
   const opt = (v, label, cur) => `<option value="${esc(v)}" ${v === cur ? 'selected' : ''}>${esc(label)}</option>`;
 
   app.innerHTML = `
+       ${onlyNew ? `<p><b>Showing flags created in the latest run.</b> <a href="#/flags">Show all open flags</a></p>` : ''}
     <div class="toolbar">
       <select id="fCourse">${opt('', 'All courses', course)}${state.courses.map((c) => opt(c.course, c.course, course)).join('')}</select>
       <select id="fImpact">${['', 'Certification', 'High', 'Medium', 'Low'].map((i) => opt(i, i || 'All impact levels', impact)).join('')}</select>
@@ -148,7 +176,9 @@ async function viewFlags(query) {
     ${rows.length ? rows.map((f) => `
       <div class="flag ${esc(f.impact)}" data-id="${f.id}">
         <div>
-          <div class="loc">${esc(f.course)} › ${esc(f.location)} ${f.isSample ? '<span class="badge sample">SAMPLE</span>' : ''}</div>
+                    <div class="loc">${esc(f.course)} › ${esc(f.location)}
+            ${isNew(f) ? '<span class="badge sample">NEW</span>' : ''}
+            ${f.isSample ? '<span class="badge sample">SAMPLE</span>' : ''}</div>
           <div class="meta">${esc(f.vendor || '')} · ${esc((f.changeDate || '').slice(0, 10))} · ${esc(f.title || '')}</div>
         </div>
         <div class="right"><span class="badge ${esc(f.impact)}">${esc(f.impact)}</span><div class="meta">${esc(f.status)}</div></div>
@@ -260,6 +290,49 @@ async function viewEmails() {
   app.querySelectorAll('.email-row').forEach((tr) => (tr.onclick = () => show(tr.dataset.id)));
   if (rows[0]) show(rows[0].id);
 }
+
+// ---------------- "Run now" ----------------
+const runBtn = document.getElementById('runBtn');
+const runPanel = document.getElementById('runPanel');
+const runLog = document.getElementById('runLog');
+const runStatus = document.getElementById('runStatus');
+document.getElementById('runClose').onclick = () => runPanel.classList.add('hidden');
+
+async function pollRun() {
+  const s = await api('/run/status');
+  runPanel.classList.remove('hidden');
+  runLog.textContent = s.log.join('\n');
+  runLog.scrollTop = runLog.scrollHeight;               // follow the latest line
+
+  if (s.running) {
+    const secs = Math.round((Date.now() - new Date(s.startedAt)) / 1000);
+    runStatus.textContent = `⏳ Running… ${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}`;
+    runBtn.disabled = true;
+    setTimeout(pollRun, 1500);
+  } else {
+        const n = s.lastRun?.newFlags ?? 0;
+    runStatus.innerHTML = (s.exitCode === 0 ? '✅ Finished – all steps OK' : '❌ Finished with errors') +
+      ` · <b>${n} new flag${n === 1 ? '' : 's'}</b>` +
+      (n ? ` · <a href="#/flags?new=1" style="color:#C9B5F0">View new flags</a>` : '');
+    runBtn.disabled = false;
+    state.lastRun = undefined;                           // reload last-run info on next view
+    delete state.lastRun;
+    route();                                             // refresh the page with new results                                           // refresh the page with new results
+  }
+}
+
+runBtn.onclick = async () => {
+  runBtn.disabled = true;
+  try {
+    await api('/run', { method: 'POST' });
+  } catch (e) {
+    if (!/already/i.test(e.message)) { runBtn.disabled = false; runStatus.textContent = `❌ ${e.message}`; return; }
+  }
+  pollRun();
+};
+
+// If a run is already going when the page opens, reconnect to it
+api('/run/status').then((s) => { if (s.running) pollRun(); }).catch(() => {});
 
 // ---------------- Simple router ----------------
 function route() {

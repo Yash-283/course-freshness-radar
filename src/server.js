@@ -1,3 +1,4 @@
+import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import 'dotenv/config';
@@ -31,14 +32,21 @@ app.get('/api/overview', (req, res) => {
 });
 
 // ---- Flags list with filters ----
+// ---- Flags list with filters ----
 app.get('/api/flags', (req, res) => {
   const { course = '', impact = '', status = 'open' } = req.query;
   const where = [];
   const args = [];
+
   if (course) { where.push('f.course = ?'); args.push(course); }
   if (impact) { where.push('f.impact = ?'); args.push(impact); }
   if (status === 'open') where.push("f.status IN ('New', 'Accepted')");
   else if (status !== 'all') { where.push('f.status = ?'); args.push(status); }
+
+  // Only flags created in the latest run ("View new flags")
+  if (req.query.new === '1') {
+    where.push('f.createdAt >= (SELECT startedAt FROM runs ORDER BY id DESC LIMIT 1)');
+  }
 
   const rows = db.prepare(`
     SELECT f.id, f.course, f.location, f.impact, f.status, f.confidence, f.isSample, f.createdAt,
@@ -89,6 +97,40 @@ app.get('/api/news', (req, res) => {
     SELECT vendor, source, title, link, COALESCE(date, firstSeen) AS d, relevant, courses, changeType
     FROM changes ${onlyRelevant ? 'WHERE relevant = 1' : ''}
     ORDER BY d DESC LIMIT 150`).all());
+});
+
+// ---- "Run now" button: start the daily pipeline from the dashboard ----
+const runState = { running: false, startedAt: null, finishedAt: null, exitCode: null, log: [] };
+
+app.post('/api/run', (req, res) => {
+  if (runState.running) return res.status(409).json({ error: 'A run is already in progress' });
+
+  Object.assign(runState, { running: true, startedAt: new Date().toISOString(), finishedAt: null, exitCode: null, log: [] });
+
+  // Same as "npm run daily"
+  const child = spawn(process.execPath, ['--experimental-sqlite', '--no-warnings', 'src/run.js'], { env: process.env });
+
+  const addLines = (chunk) => {
+    for (const line of chunk.toString().split(/\r\n|\r|\n/)) {
+      if (line.trim()) runState.log.push(line);
+    }
+    if (runState.log.length > 500) runState.log.splice(0, runState.log.length - 500); // keep the last 500 lines
+  };
+  child.stdout.on('data', addLines);
+  child.stderr.on('data', addLines);
+  child.on('close', (code) => Object.assign(runState, { running: false, finishedAt: new Date().toISOString(), exitCode: code }));
+  child.on('error', (err) => {
+    runState.log.push(`Could not start the run: ${err.message}`);
+    Object.assign(runState, { running: false, finishedAt: new Date().toISOString(), exitCode: 1 });
+  });
+
+  res.json({ ok: true });
+});
+
+app.get('/api/run/status', (req, res) => {
+  const lastRun = runState.running ? null
+    : db.prepare('SELECT startedAt, status, newFlags FROM runs ORDER BY id DESC LIMIT 1').get() || null;
+  res.json({ ...runState, lastRun });
 });
 
 // Only reachable from this laptop until proper login is added on AWS

@@ -20,7 +20,8 @@
     "match-debug": "node --experimental-sqlite src/match/debug.js",
     "notify": "node --experimental-sqlite src/notify/notify.js",
     "digest": "node --experimental-sqlite src/notify/notify.js --digest",
-        "daily": "node --experimental-sqlite --no-warnings src/run.js"
+    "daily": "node --experimental-sqlite --no-warnings src/run.js",
+    "demo-reset": "node --experimental-sqlite --no-warnings src/demo-reset.js"
   },
   "keywords": [],
   "author": "",
