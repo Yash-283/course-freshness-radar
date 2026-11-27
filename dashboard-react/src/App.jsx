@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { LayoutDashboard, Flag, Newspaper, Mail, Play, LoaderCircle, Radar } from 'lucide-react';
+import { LayoutDashboard, Flag, Newspaper, Mail, Play, LoaderCircle, Radar, Sparkles } from 'lucide-react';
 import { useRoute } from './router.js';
 import { useApi } from './useApi.js';
 import { api, fmtDate } from './api.js';
 import RunPanel, { startRun } from './RunPanel.jsx';
+import ChatPanel from './ChatPanel.jsx';
 import Overview from './pages/Overview.jsx';
 import Flags from './pages/Flags.jsx';
 import FlagDetail from './pages/FlagDetail.jsx';
@@ -29,6 +30,7 @@ export default function App() {
   // ---- Run now ----
   const [run, setRun] = useState(null);
   const [panelOpen, setPanelOpen] = useState(false);
+  const [chatOpen, setChatOpen] = useState(false);
   const timer = useRef(null);
 
   const poll = useCallback(async () => {
@@ -123,9 +125,12 @@ export default function App() {
               {sched && (nextRun ? ` · ⏰ Next run ${nextRun}` : ' · ⏰ Schedule off')}
             </div>
           </div>
-          <button className="btn btn-primary" onClick={onRunNow} disabled={run?.running}>
-            {run?.running ? <><LoaderCircle size={16} className="spin" /> Running…</> : <><Play size={16} /> Run now</>}
-          </button>
+                 <div className="topbar-actions">
+            <button className="btn btn-light" onClick={() => setChatOpen((o) => !o)}><Sparkles size={16} /> Ask Radar</button>
+            <button className="btn btn-primary" onClick={onRunNow} disabled={run?.running}>
+              {run?.running ? <><LoaderCircle size={16} className="spin" /> Running…</> : <><Play size={16} /> Run now</>}
+            </button>
+          </div>
         </header>
 
         {import.meta.env.VITE_MOCK === '1' && (
@@ -140,7 +145,7 @@ export default function App() {
           {page === 'emails' && <Emails reloadKey={reloadKey} />}
         </main>
       </div>
-
+      <ChatPanel open={chatOpen} onClose={() => setChatOpen(false)} />
       <RunPanel open={panelOpen} run={run} onClose={() => setPanelOpen(false)} onFinished={() => setPanelOpen(false)} />
     </div>
   );

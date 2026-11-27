@@ -32,6 +32,7 @@ export function findChunks({ courses, keywords = [], products = [], limit = 10, 
     SELECT id, fileId, course, location, text FROM chunks
     WHERE course IN (${courses.map(() => '?').join(',')})
       AND (${terms.map(() => 'text LIKE ?').join(' OR ')})
+      AND fileId NOT IN (SELECT id FROM files WHERE excluded = 1)
     LIMIT 5000`).all(...courses, ...terms.map((t) => `%${t}%`));
 
   const scored = rows
@@ -64,6 +65,7 @@ export function curriculumChunks(courses, perCourse = 2) {
     out.push(...db.prepare(`
       SELECT id, fileId, course, location, text FROM chunks
       WHERE course = ? AND location LIKE '%urriculum%'
+        AND fileId NOT IN (SELECT id FROM files WHERE excluded = 1)
       ORDER BY id LIMIT ?`).all(course, perCourse));
   }
   return out;

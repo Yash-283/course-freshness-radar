@@ -122,7 +122,7 @@ export async function checkBudget() {
   const cap = Number(process.env.AI_MONTHLY_CAP_USD || 4.5);
   const pct = Number(process.env.AI_ALERT_PCT || 80);
   const monthStart = new Date(); monthStart.setUTCDate(1); monthStart.setUTCHours(0, 0, 0, 0);
-  const spent = db.prepare('SELECT COALESCE(SUM(costUsd), 0) AS s FROM ai_usage WHERE at >= ?').get(monthStart.toISOString()).s;
+    const spent = db.prepare("SELECT COALESCE(SUM(costUsd), 0) AS s FROM ai_usage WHERE at >= ? AND COALESCE(purpose, '') <> 'chat'").get(monthStart.toISOString()).s;
   const alreadySent = db.prepare("SELECT COUNT(*) AS n FROM notifications WHERE type = 'budget' AND at >= ?")
                         .get(monthStart.toISOString()).n > 0;
 

@@ -1,15 +1,4 @@
-// Daily schedule: WHEN should the automatic run happen?
-// Settings in .env (all optional):
-//   SCHEDULE=on                 on / off
-//   SCHEDULE_TIME=07:00         24-hour clock
-//   SCHEDULE_TZ=Asia/Kolkata    time zone (servers run on UTC, so this matters)
-//   SCHEDULE_DAYS=every         every / weekdays (Mon–Fri)
-//
-// Rules:
-//  - the run is DUE once today's scheduled time has passed and no run has started since then
-//    (a manual "Run now" after 7:00 also counts; one before 7:00 does not)
-//  - catch-up: if the computer/server was off at 7:00, the run starts as soon as the tool is running again
-//  - on "weekdays", Saturday and Sunday are skipped
+
 import 'dotenv/config';
 
 export const schedule = {

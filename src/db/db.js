@@ -82,6 +82,8 @@ for (const sql of [
   'ALTER TABLE files ADD COLUMN webUrl TEXT',    // SharePoint link of each file
   'ALTER TABLE flags ADD COLUMN fileId TEXT',    // which file a flag belongs to
   'ALTER TABLE flags ADD COLUMN notifiedAt TEXT',   // when a flag was emailed
+  'ALTER TABLE files ADD COLUMN isDs INTEGER',      // PPTX only: 1 = DS template, 0 = other template
+  'ALTER TABLE files ADD COLUMN excluded INTEGER DEFAULT 0', // 1 = not used for matching (non-DS deck)
 ]) {
   try { raw.exec(sql); } catch { /* column already exists */ }
 }

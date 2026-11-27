@@ -24,7 +24,8 @@ export function monthSpend() {
   const start = new Date();
   start.setUTCDate(1);
   start.setUTCHours(0, 0, 0, 0);
-  return db.prepare('SELECT COALESCE(SUM(costUsd), 0) AS s FROM ai_usage WHERE at >= ?')
+    // (the Ask Radar chat has its own budget, so it is not counted here)
+  return db.prepare("SELECT COALESCE(SUM(costUsd), 0) AS s FROM ai_usage WHERE at >= ? AND COALESCE(purpose, '') <> 'chat'")
            .get(start.toISOString()).s;
 }
 

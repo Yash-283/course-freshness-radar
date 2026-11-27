@@ -7,6 +7,7 @@ import { db } from './db/db.js';
 import { courseScores } from './flags/score.js';
 import { schedule, isDue, nextRunAt } from './scheduler.js';
 import { notifyAdmin } from './notify/notify.js';
+import { askRadar, chatStatus } from './chat/assistant.js';
 
 const app = express();
 app.use(express.json());
@@ -28,9 +29,10 @@ app.get('/api/overview', (req, res) => {
            (SELECT COUNT(*) FROM changes) AS news,
            (SELECT COUNT(*) FROM changes WHERE relevant = 1) AS relevantNews,
            (SELECT MAX(indexedAt) FROM files) AS lastIndexed`).get();
-  const spent = db.prepare('SELECT COALESCE(SUM(costUsd), 0) AS s FROM ai_usage WHERE at >= ?').get(monthStart()).s;
+    // daily checks budget (the Ask Radar chat has its own budget)
+  const spent = db.prepare("SELECT COALESCE(SUM(costUsd), 0) AS s FROM ai_usage WHERE at >= ? AND COALESCE(purpose, '') <> 'chat'").get(monthStart()).s;
     const lastRun = db.prepare('SELECT startedAt, status, newFlags, aiCost FROM runs ORDER BY id DESC LIMIT 1').get() || null;
-  res.json({ courses: courseScores(), totals, ai: { spent, cap: CAP }, lastRun, schedule: scheduleInfo() });
+   res.json({ courses: courseScores(), totals, ai: { spent, cap: CAP }, chat: chatStatus(), lastRun, schedule: scheduleInfo() });
 });
 
 // ---- Flags list with filters ----
@@ -285,6 +287,26 @@ if (schedule.enabled) {
   setTimeout(scheduleTick, 5000);          // catch-up check shortly after start
   setInterval(scheduleTick, 60 * 1000);    // then every minute
 }
+
+// ---- Short file links used by Ask Radar: /open/42 → the file in SharePoint ----
+app.get('/open/:n', (req, res) => {
+  const row = db.prepare('SELECT webUrl FROM files WHERE rowid = ?').get(Number(req.params.n));
+  if (!row?.webUrl || !/^https:\/\//i.test(row.webUrl)) return res.status(404).send('File not found (it may have been replaced by a newer version).');
+  res.redirect(302, row.webUrl);
+});
+
+// ---- Ask Radar chat (read-only assistant) ----
+app.get('/api/chat/status', (req, res) => res.json(chatStatus()));
+
+app.post('/api/chat', async (req, res) => {
+  const messages = Array.isArray(req.body?.messages) ? req.body.messages : [];
+  try {
+    res.json(await askRadar(messages));
+  } catch (err) {
+    console.log(`⚠ Ask Radar: ${err.message}`);
+    res.status(err.status || 500).json({ error: err.status ? err.message : `Ask Radar could not answer: ${err.message}` });
+  }
+});
 
 // ---- Emails (sent or previewed) ----
 app.get('/api/notifications', (req, res) => {

@@ -1,3 +1,4 @@
+
 import 'dotenv/config';
 import { spawnSync } from 'node:child_process';
 import { db } from './db/db.js';
@@ -12,7 +13,7 @@ const STEPS = [
   { name: 'Notifications',                    script: 'src/notify/notify.js' },
 ];
 
-const totalSpend = () => db.prepare('SELECT COALESCE(SUM(costUsd), 0) AS s FROM ai_usage').get().s;
+const totalSpend = () => db.prepare("SELECT COALESCE(SUM(costUsd), 0) AS s FROM ai_usage WHERE COALESCE(purpose, '') <> 'chat'").get().s;
 const started = new Date();
 const spendBefore = totalSpend();
 const results = [];
