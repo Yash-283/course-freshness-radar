@@ -5,6 +5,8 @@ import 'dotenv/config';
 import express from 'express';
 import { db } from './db/db.js';
 import { courseScores } from './flags/score.js';
+import { schedule, isDue, nextRunAt } from './scheduler.js';
+import { notifyAdmin } from './notify/notify.js';
 
 const app = express();
 app.use(express.json());
@@ -28,10 +30,9 @@ app.get('/api/overview', (req, res) => {
            (SELECT MAX(indexedAt) FROM files) AS lastIndexed`).get();
   const spent = db.prepare('SELECT COALESCE(SUM(costUsd), 0) AS s FROM ai_usage WHERE at >= ?').get(monthStart()).s;
     const lastRun = db.prepare('SELECT startedAt, status, newFlags, aiCost FROM runs ORDER BY id DESC LIMIT 1').get() || null;
-  res.json({ courses: courseScores(), totals, ai: { spent, cap: CAP }, lastRun });
+  res.json({ courses: courseScores(), totals, ai: { spent, cap: CAP }, lastRun, schedule: scheduleInfo() });
 });
 
-// ---- Flags list with filters ----
 // ---- Flags list with filters ----
 app.get('/api/flags', (req, res) => {
   const { course = '', impact = '', status = 'open' } = req.query;
@@ -207,13 +208,14 @@ app.get('/api/news', (req, res) => {
     ORDER BY d DESC LIMIT 150`).all());
 });
 
-// ---- "Run now" button: start the daily pipeline from the dashboard ----
-const runState = { running: false, startedAt: null, finishedAt: null, exitCode: null, log: [] };
+// ---- The daily pipeline: started by "Run now" OR by the 7 AM schedule ----
+const runState = { running: false, trigger: null, startedAt: null, finishedAt: null, exitCode: null, log: [] };
+const lastRunStarted = () => db.prepare('SELECT startedAt FROM runs ORDER BY id DESC LIMIT 1').get()?.startedAt || null;
 
-app.post('/api/run', (req, res) => {
-  if (runState.running) return res.status(409).json({ error: 'A run is already in progress' });
-
-  Object.assign(runState, { running: true, startedAt: new Date().toISOString(), finishedAt: null, exitCode: null, log: [] });
+function startRun(trigger) {
+  if (runState.running) return false;
+  Object.assign(runState, { running: true, trigger, startedAt: new Date().toISOString(), finishedAt: null, exitCode: null, log: [] });
+  runState.log.push(trigger === 'schedule' ? '⏰ Scheduled daily run' : '▶ Started from the dashboard');
 
   // Same as "npm run daily"
   const child = spawn(process.execPath, ['--experimental-sqlite', '--no-warnings', 'src/run.js'], { env: process.env });
@@ -231,15 +233,58 @@ app.post('/api/run', (req, res) => {
     runState.log.push(`Could not start the run: ${err.message}`);
     Object.assign(runState, { running: false, finishedAt: new Date().toISOString(), exitCode: 1 });
   });
+  return true;
+}
 
+app.post('/api/run', (req, res) => {
+  if (!startRun('manual')) return res.status(409).json({ error: 'A run is already in progress' });
   res.json({ ok: true });
 });
 
 app.get('/api/run/status', (req, res) => {
   const lastRun = runState.running ? null
     : db.prepare('SELECT startedAt, status, newFlags FROM runs ORDER BY id DESC LIMIT 1').get() || null;
-  res.json({ ...runState, lastRun });
+  res.json({ ...runState, lastRun, schedule: scheduleInfo() });
 });
+
+// ---- 7 AM schedule: checked every minute (and once right after start = catch-up) ----
+function scheduleInfo() {
+  return { ...schedule, nextRun: nextRunAt(lastRunStarted()) };
+}
+
+let lastScheduledAttempt = '';   // one automatic attempt per day, even if a run crashes before it is logged
+let lastStaleAlert = 0;
+
+async function scheduleTick() {
+  try {
+    const last = lastRunStarted();
+    const today = new Date().toLocaleDateString('en-CA', { timeZone: schedule.tz }); // YYYY-MM-DD
+
+    if (isDue(last) && lastScheduledAttempt !== today) {
+      if (startRun('schedule')) {
+        lastScheduledAttempt = today;
+        console.log(`⏰ Scheduled daily run started (${new Date().toLocaleString('en-IN', { timeZone: schedule.tz })})`);
+      }
+    }
+
+    // Safety net: tell the admin if no run has happened for 2 days (at most once a day)
+    const ageHours = last ? (Date.now() - new Date(last)) / 36e5 : 0;
+    if (schedule.enabled && last && ageHours > 48 && Date.now() - lastStaleAlert > 24 * 36e5 && !runState.running) {
+      lastStaleAlert = Date.now();
+      await notifyAdmin('No daily run for 2 days', [
+        `The last run started ${new Date(last).toLocaleString('en-IN', { timeZone: schedule.tz })}.`,
+        'Check that the server and the dashboard are running.',
+      ]).catch((err) => console.log(`  (could not email the admin: ${err.message})`));
+    }
+  } catch (err) {
+    console.log(`⚠ Scheduler check failed: ${err.message}`);
+  }
+}
+
+if (schedule.enabled) {
+  setTimeout(scheduleTick, 5000);          // catch-up check shortly after start
+  setInterval(scheduleTick, 60 * 1000);    // then every minute
+}
 
 // ---- Emails (sent or previewed) ----
 app.get('/api/notifications', (req, res) => {
@@ -261,4 +306,8 @@ app.get('/api/notifications/:id/html', (req, res) => {
 const PORT = Number(process.env.PORT || 3000);
 app.listen(PORT, '127.0.0.1', () => {
   console.log(`Dashboard running at http://localhost:${PORT}`);
+  const next = scheduleInfo().nextRun;
+  console.log(schedule.enabled
+    ? `⏰ Daily run at ${schedule.time} (${schedule.tz}, ${schedule.days === 'weekdays' ? 'Mon–Fri' : 'every day'}) · next: ${next ? new Date(next).toLocaleString('en-IN', { timeZone: schedule.tz }) : '–'}`
+    : '⏰ Schedule is OFF (SCHEDULE=off in .env)');
 });

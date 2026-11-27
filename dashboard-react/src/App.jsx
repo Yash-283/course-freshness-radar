@@ -37,17 +37,29 @@ export default function App() {
       const s = await api('/run/status');
       setRun(s);
       if (s.running) timer.current = setTimeout(poll, 1500);
-      else refresh(); // run finished → reload everything
+      else { timer.current = null; refresh(); } // run finished → reload everything
     } catch {
       timer.current = setTimeout(poll, 3000);
     }
   }, [refresh]);
 
-  // Reconnect if a run is already in progress when the page opens
+  // Reconnect if a run is already in progress when the page opens,
+  // and notice a scheduled (7 AM) run that starts while the page is open
+  const seenRun = useRef(undefined);
   useEffect(() => {
-    api('/run/status').then((s) => { if (s.running) { setRun(s); setPanelOpen(true); poll(); } }).catch(() => {});
-    return () => clearTimeout(timer.current);
-  }, [poll]);
+    const check = () => api('/run/status')
+      .then((s) => {
+        if (s.running && !timer.current) { setRun(s); setPanelOpen(true); poll(); return; }
+        // a run finished between two checks → reload the data
+        const latest = s.lastRun?.startedAt ?? null;
+        if (!s.running && seenRun.current !== undefined && latest !== seenRun.current) refresh();
+        if (!s.running) seenRun.current = latest;
+      })
+      .catch(() => {});
+    check();
+    const every = setInterval(check, 60 * 1000);
+    return () => { clearInterval(every); clearTimeout(timer.current); };
+  }, [poll, refresh]);
 
   const onRunNow = async () => {
     setPanelOpen(true);
@@ -66,6 +78,8 @@ export default function App() {
 
   const ai = overview.data?.ai;
   const lastRun = overview.data?.lastRun;
+  const sched = overview.data?.schedule;
+  const nextRun = sched?.enabled && sched.nextRun ? fmtDate(sched.nextRun) : null;
   const spendPct = ai ? Math.min(100, (ai.spent / ai.cap) * 100) : 0;
 
   return (
@@ -105,7 +119,8 @@ export default function App() {
           <div>
             <div className="topbar-title">{TITLES[page]}</div>
             <div className="muted small">
-              {lastRun ? `Last daily run ${fmtDate(lastRun.startedAt)} · ${lastRun.status === 'ok' ? '✅ OK' : '❌ errors'}` : 'No run yet'}
+              {lastRun ? `Last run ${fmtDate(lastRun.startedAt)} · ${lastRun.status === 'ok' ? '✅ OK' : '❌ errors'}` : 'No run yet'}
+              {sched && (nextRun ? ` · ⏰ Next run ${nextRun}` : ' · ⏰ Schedule off')}
             </div>
           </div>
           <button className="btn btn-primary" onClick={onRunNow} disabled={run?.running}>
